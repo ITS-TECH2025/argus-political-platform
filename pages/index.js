@@ -33,13 +33,19 @@ const mockPoliticians = [
 
 export default function ArgusPlatform() {
   const [searchTerm, setSearchTerm] = useState('');
+const [selectedParty, setSelectedParty] = useState('');
+const [selectedState, setSelectedState] = useState('');
 
   const filteredPoliticians = useMemo(() => {
-    return mockPoliticians.filter(politician => 
-      politician.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      politician.state.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }, [searchTerm]);
+  return mockPoliticians.filter(politician => {
+    const matchesSearch = politician.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        politician.state.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesParty = !selectedParty || politician.party === selectedParty;
+    const matchesState = !selectedState || politician.state === selectedState;
+    
+    return matchesSearch && matchesParty && matchesState;
+  });
+}, [searchTerm, selectedParty, selectedState]);
 
   return (
     <div className="min-h-screen bg-argus-light">
@@ -61,19 +67,44 @@ export default function ArgusPlatform() {
             <span>Transparent data on your representatives • Non-partisan information</span>
           </div>
 
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-            <input
-              type="text"
-              placeholder="Search representatives by name or state..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-argus-teal focus:border-argus-teal"
-            />
-          </div>
-        </div>
-      </div>
+         {/* Search and Filters */}
+<div className="flex flex-col lg:flex-row gap-4">
+  <div className="flex-1">
+    <div className="relative">
+      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+      <input
+        type="text"
+        placeholder="Search representatives by name or state..."
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-argus-teal focus:border-argus-teal"
+      />
+    </div>
+  </div>
+  
+  <div className="flex gap-3">
+    <select
+      value={selectedParty}
+      onChange={(e) => setSelectedParty(e.target.value)}
+      className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-argus-teal focus:border-argus-teal bg-white min-w-[140px]"
+    >
+      <option value="">All Parties</option>
+      <option value="D">Democrat</option>
+      <option value="R">Republican</option>
+    </select>
+    
+    <select
+      value={selectedState}
+      onChange={(e) => setSelectedState(e.target.value)}
+      className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-argus-teal focus:border-argus-teal bg-white min-w-[120px]"
+    >
+      <option value="">All States</option>
+      <option value="CA">California</option>
+      <option value="TX">Texas</option>
+      <option value="NY">New York</option>
+    </select>
+  </div>
+</div>
 
       {/* Main Content */}
       <div className="max-w-6xl mx-auto p-6">
