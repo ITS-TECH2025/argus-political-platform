@@ -115,9 +115,12 @@ if (state) {
     }
 
     // Apply filters
-    if (party) {
-      politicians = politicians.filter(p => p.party === party);
-    }
+if (party) {
+  politicians = politicians.filter(p => p.party === party);
+}
+if (state) {
+  politicians = politicians.filter(p => p.state === state);
+}
     
     if (state) {
       // Convert state code to full name
