@@ -1,39 +1,14 @@
 // pages/api/politicians.js
-// Complete updated version with state filter fix
+// Complete working version with state mapping
 
 export default async function handler(req, res) {
   const { party, state, search } = req.query;
   
+  // Get API key from environment variable
   const apiKey = process.env.CONGRESS_API_KEY;
   
-  // State code to full name mapping
-const STATE_MAP = {
-  'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas',
-  'CA': 'California', 'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware',
-  'FL': 'Florida', 'GA': 'Georgia', 'HI': 'Hawaii', 'ID': 'Idaho',
-  'IL': 'Illinois', 'IN': 'Indiana', 'IA': 'Iowa', 'KS': 'Kansas',
-  'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine', 'MD': 'Maryland',
-  'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota', 'MS': 'Mississippi',
-  'MO': 'Missouri', 'MT': 'Montana', 'NE': 'Nebraska', 'NV': 'Nevada',
-  'NH': 'New Hampshire', 'NJ': 'New Jersey', 'NM': 'New Mexico', 'NY': 'New York',
-  'NC': 'North Carolina', 'ND': 'North Dakota', 'OH': 'Ohio', 'OK': 'Oklahoma',
-  'OR': 'Oregon', 'PA': 'Pennsylvania', 'RI': 'Rhode Island', 'SC': 'South Carolina',
-  'SD': 'South Dakota', 'TN': 'Tennessee', 'TX': 'Texas', 'UT': 'Utah',
-  'VT': 'Vermont', 'VA': 'Virginia', 'WA': 'Washington', 'WV': 'West Virginia',
-  'WI': 'Wisconsin', 'WY': 'Wyoming'
-};
-
-// In your filter section, update the state filter:
-if (state) {
-  // Convert state code (FL) to full name (Florida)
-  const stateFullName = STATE_MAP[state] || state;
-  
-  politicians = politicians.filter(p => 
-    p.state === stateFullName
-  );
-}
-  
   if (!apiKey) {
+    console.error('CONGRESS_API_KEY not found in environment variables');
     return res.status(500).json({ 
       error: 'API configuration error',
       message: 'Congress API key not configured.'
@@ -63,6 +38,25 @@ if (state) {
     if (!data.members || data.members.length === 0) {
       throw new Error('No members data received from Congress.gov');
     }
+
+    // State code to full name mapping
+    const STATE_MAP = {
+      'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas',
+      'CA': 'California', 'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware',
+      'FL': 'Florida', 'GA': 'Georgia', 'HI': 'Hawaii', 'ID': 'Idaho',
+      'IL': 'Illinois', 'IN': 'Indiana', 'IA': 'Iowa', 'KS': 'Kansas',
+      'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine', 'MD': 'Maryland',
+      'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota', 'MS': 'Mississippi',
+      'MO': 'Missouri', 'MT': 'Montana', 'NE': 'Nebraska', 'NV': 'Nevada',
+      'NH': 'New Hampshire', 'NJ': 'New Jersey', 'NM': 'New Mexico', 'NY': 'New York',
+      'NC': 'North Carolina', 'ND': 'North Dakota', 'OH': 'Ohio', 'OK': 'Oklahoma',
+      'OR': 'Oregon', 'PA': 'Pennsylvania', 'RI': 'Rhode Island', 'SC': 'South Carolina',
+      'SD': 'South Dakota', 'TN': 'Tennessee', 'TX': 'Texas', 'UT': 'Utah',
+      'VT': 'Vermont', 'VA': 'Virginia', 'WA': 'Washington', 'WV': 'West Virginia',
+      'WI': 'Wisconsin', 'WY': 'Wyoming', 'DC': 'District of Columbia',
+      'PR': 'Puerto Rico', 'VI': 'Virgin Islands', 'GU': 'Guam', 'AS': 'American Samoa',
+      'MP': 'Northern Mariana Islands'
+    };
 
     // Process all members and filter for House only
     let politicians = data.members
@@ -106,34 +100,23 @@ if (state) {
       });
 
     console.log(`Processed ${politicians.length} House representatives`);
-    
-    // Log state values for debugging
-    if (state) {
-      const uniqueStates = [...new Set(politicians.map(p => p.state))];
-      console.log('Available states in data:', uniqueStates);
-      console.log('Looking for state:', state);
-    }
 
     // Apply filters
-if (party) {
-  politicians = politicians.filter(p => p.party === party);
-}
-if (state) {
-  politicians = politicians.filter(p => p.state === state);
-}
+    if (party) {
+      politicians = politicians.filter(p => p.party === party);
+      console.log(`After party filter: ${politicians.length} representatives`);
+    }
     
     if (state) {
-      // Convert state code to full name
-      const stateName = STATE_MAP[state] || state;
+      // Convert state code to full name if needed
+      const stateFullName = STATE_MAP[state] || state;
+      console.log(`Filtering for state: ${state} -> ${stateFullName}`);
       
       politicians = politicians.filter(p => {
-        // Check if politician's state matches either code or full name
-        return p.state === state || 
-               p.state === stateName ||
-               p.state?.toUpperCase() === state.toUpperCase();
+        return p.state === stateFullName || p.state === state;
       });
       
-      console.log(`Filtering for state: ${state} (${stateName}), found ${politicians.length} reps`);
+      console.log(`After state filter: ${politicians.length} representatives`);
     }
     
     if (search) {
@@ -142,6 +125,7 @@ if (state) {
         p.name.toLowerCase().includes(searchLower) ||
         p.state.toLowerCase().includes(searchLower)
       );
+      console.log(`After search filter: ${politicians.length} representatives`);
     }
 
     // Sort by state and district
@@ -157,7 +141,7 @@ if (state) {
       total: politicians.length,
       timestamp: new Date().toISOString(),
       source: 'congress.gov',
-      filters: { party, state, search } // Include filters in response for debugging
+      filters: { party, state, search }
     });
 
   } catch (error) {
