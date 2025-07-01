@@ -60,7 +60,30 @@ export default async function handler(req, res) {
     
     console.log(`Total members fetched: ${allMembers.length}`);
 
-    // State code to full name mapping
+    // Debug: Check what chamber values we're getting
+if (req.query.debug === 'chambers') {
+  const chamberTypes = {};
+  allMembers.forEach(member => {
+    const chamber = member.terms?.item?.[0]?.chamber || 'No chamber';
+    chamberTypes[chamber] = (chamberTypes[chamber] || 0) + 1;
+  });
+  
+  // Also show a few Senate examples if any
+  const senateExamples = allMembers
+    .filter(m => m.terms?.item?>[0]?.chamber?.toLowerCase().includes('senat'))
+    .slice(0, 3)
+    .map(m => ({
+      name: m.name,
+      state: m.state,
+      chamber: m.terms.item[0].chamber
+    }));
+  
+  return res.status(200).json({
+    chamberTypes,
+    senateExamples,
+    totalMembers: allMembers.length
+  });
+}    // State code to full name mapping
     const STATE_MAP = {
       'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas',
       'CA': 'California', 'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware',
