@@ -67,7 +67,7 @@ const [selectedState, setSelectedState] = useState('');
             <span>Transparent data on your representatives • Non-partisan information</span>
           </div>
 
-         {/* Search and Filters */}
+{/* Search and Filters */}
 <div className="flex flex-col lg:flex-row gap-4">
   <div className="flex-1">
     <div className="relative">
@@ -81,7 +81,6 @@ const [selectedState, setSelectedState] = useState('');
       />
     </div>
   </div>
-  
   <div className="flex gap-3">
     <select
       value={selectedParty}
@@ -92,7 +91,6 @@ const [selectedState, setSelectedState] = useState('');
       <option value="D">Democrat</option>
       <option value="R">Republican</option>
     </select>
-    
     <select
       value={selectedState}
       onChange={(e) => setSelectedState(e.target.value)}
@@ -101,7 +99,6 @@ const [selectedState, setSelectedState] = useState('');
       <option value="">All States</option>
       <option value="CA">California</option>
       <option value="TX">Texas</option>
-      <option value="NY">New York</option>
     </select>
   </div>
 </div>
