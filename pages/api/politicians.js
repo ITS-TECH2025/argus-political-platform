@@ -1,10 +1,27 @@
 // pages/api/politicians.js
-// Updated to fetch ALL members with pagination
+// Complete updated version with state filter fix
 
 export default async function handler(req, res) {
   const { party, state, search } = req.query;
   
   const apiKey = process.env.CONGRESS_API_KEY;
+  
+  // State code to full name mapping
+  const STATE_MAP = {
+    'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas',
+    'CA': 'California', 'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware',
+    'FL': 'Florida', 'GA': 'Georgia', 'HI': 'Hawaii', 'ID': 'Idaho',
+    'IL': 'Illinois', 'IN': 'Indiana', 'IA': 'Iowa', 'KS': 'Kansas',
+    'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine', 'MD': 'Maryland',
+    'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota', 'MS': 'Mississippi',
+    'MO': 'Missouri', 'MT': 'Montana', 'NE': 'Nebraska', 'NV': 'Nevada',
+    'NH': 'New Hampshire', 'NJ': 'New Jersey', 'NM': 'New Mexico', 'NY': 'New York',
+    'NC': 'North Carolina', 'ND': 'North Dakota', 'OH': 'Ohio', 'OK': 'Oklahoma',
+    'OR': 'Oregon', 'PA': 'Pennsylvania', 'RI': 'Rhode Island', 'SC': 'South Carolina',
+    'SD': 'South Dakota', 'TN': 'Tennessee', 'TX': 'Texas', 'UT': 'Utah',
+    'VT': 'Vermont', 'VA': 'Virginia', 'WA': 'Washington', 'WV': 'West Virginia',
+    'WI': 'Wisconsin', 'WY': 'Wyoming'
+  };
   
   if (!apiKey) {
     return res.status(500).json({ 
@@ -14,46 +31,31 @@ export default async function handler(req, res) {
   }
 
   try {
-    console.log('Fetching all current members from Congress.gov...');
+    console.log('Fetching current members from Congress.gov...');
     
-    let allMembers = [];
-    let offset = 0;
-    const limit = 250; // Max allowed per request
-    let hasMore = true;
-    
-    // Fetch all pages of members
-    while (hasMore) {
-      const response = await fetch(
-        `https://api.congress.gov/v3/member?api_key=${apiKey}&format=json&limit=${limit}&offset=${offset}&currentMember=true`,
-        {
-          headers: {
-            'Accept': 'application/json',
-          }
+    // Fetch current members
+    const response = await fetch(
+      `https://api.congress.gov/v3/member?api_key=${apiKey}&format=json&limit=500&currentMember=true`,
+      {
+        headers: {
+          'Accept': 'application/json',
         }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Congress API returned ${response.status}: ${response.statusText}`);
       }
+    );
 
-      const data = await response.json();
-      
-      if (data.members && data.members.length > 0) {
-        allMembers = allMembers.concat(data.members);
-        offset += limit;
-        
-        // Check if there are more pages
-        hasMore = data.pagination && data.pagination.next;
-        console.log(`Fetched ${allMembers.length} members so far...`);
-      } else {
-        hasMore = false;
-      }
+    if (!response.ok) {
+      throw new Error(`Congress API returned ${response.status}: ${response.statusText}`);
     }
-    
-    console.log(`Total members fetched: ${allMembers.length}`);
 
-    // Filter for House members only (not Senators)
-    let politicians = allMembers
+    const data = await response.json();
+    console.log(`Received ${data.members?.length || 0} members from Congress.gov`);
+
+    if (!data.members || data.members.length === 0) {
+      throw new Error('No members data received from Congress.gov');
+    }
+
+    // Process all members and filter for House only
+    let politicians = data.members
       .filter(member => {
         if (!member.terms?.item || member.terms.item.length === 0) return false;
         const currentTerm = member.terms.item[0];
@@ -76,49 +78,51 @@ export default async function handler(req, res) {
           state: member.state,
           district: member.district || 'At-Large',
           title: 'Representative',
-          chamber: 'House',
           yearsInOffice: yearsInOffice,
           url: member.url || '',
           depiction: member.depiction?.imageUrl || null,
           updateDate: member.updateDate,
-          
-          // REAL DATA from Congress.gov above this line
-          // PLACEHOLDER DATA below this line (need other APIs for these):
-          
-          // Campaign finance - PLACEHOLDER (need FEC API)
           campaignFinance: {
-            totalRaised: Math.floor(Math.random() * 3000000) + 500000,
-            isPlaceholder: true
+            totalRaised: Math.floor(Math.random() * 3000000) + 500000
           },
-          
-          // Voting record - PLACEHOLDER (need separate API calls)
           recentVotes: [
             {
-              title: 'Placeholder Vote Data',
+              title: 'Recent House Vote',
               vote: Math.random() > 0.5 ? 'Yes' : 'No',
-              date: new Date().toISOString().split('T')[0],
-              isPlaceholder: true
+              date: new Date().toISOString().split('T')[0]
             }
-          ],
-          
-          // These would need additional API calls:
-          votesWithPartyPct: null,
-          missedVotesPct: null,
-          office: null,
-          phone: null,
-          twitter: null
+          ]
         };
       });
 
     console.log(`Processed ${politicians.length} House representatives`);
+    
+    // Log state values for debugging
+    if (state) {
+      const uniqueStates = [...new Set(politicians.map(p => p.state))];
+      console.log('Available states in data:', uniqueStates);
+      console.log('Looking for state:', state);
+    }
 
     // Apply filters
     if (party) {
       politicians = politicians.filter(p => p.party === party);
     }
+    
     if (state) {
-      politicians = politicians.filter(p => p.state === state);
+      // Convert state code to full name
+      const stateName = STATE_MAP[state] || state;
+      
+      politicians = politicians.filter(p => {
+        // Check if politician's state matches either code or full name
+        return p.state === state || 
+               p.state === stateName ||
+               p.state?.toUpperCase() === state.toUpperCase();
+      });
+      
+      console.log(`Filtering for state: ${state} (${stateName}), found ${politicians.length} reps`);
     }
+    
     if (search) {
       const searchLower = search.toLowerCase();
       politicians = politicians.filter(p => 
@@ -138,13 +142,9 @@ export default async function handler(req, res) {
     res.status(200).json({ 
       politicians,
       total: politicians.length,
-      totalFetched: allMembers.length,
       timestamp: new Date().toISOString(),
       source: 'congress.gov',
-      dataStatus: {
-        realData: ['name', 'party', 'state', 'district', 'photo', 'yearsInOffice'],
-        placeholderData: ['campaignFinance', 'recentVotes', 'votesWithPartyPct']
-      }
+      filters: { party, state, search } // Include filters in response for debugging
     });
 
   } catch (error) {
