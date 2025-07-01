@@ -1,5 +1,5 @@
 // pages/api/politicians.js
-// Complete working version with state mapping
+// Complete version with pagination to get ALL representatives
 
 export default async function handler(req, res) {
   const { party, state, search } = req.query;
@@ -16,28 +16,49 @@ export default async function handler(req, res) {
   }
 
   try {
-    console.log('Fetching current members from Congress.gov...');
+    console.log('Fetching all current members from Congress.gov...');
     
-    // Fetch current members
-    const response = await fetch(
-      `https://api.congress.gov/v3/member?api_key=${apiKey}&format=json&limit=500&currentMember=true`,
-      {
+    // Fetch ALL members with pagination
+    let allMembers = [];
+    let offset = 0;
+    const limit = 250; // Max per request
+    let hasMore = true;
+    
+    while (hasMore) {
+      const url = `https://api.congress.gov/v3/member?api_key=${apiKey}&format=json&limit=${limit}&offset=${offset}&currentMember=true`;
+      console.log(`Fetching members ${offset} to ${offset + limit}...`);
+      
+      const response = await fetch(url, {
         headers: {
           'Accept': 'application/json',
         }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Congress API returned ${response.status}: ${response.statusText}`);
       }
-    );
 
-    if (!response.ok) {
-      throw new Error(`Congress API returned ${response.status}: ${response.statusText}`);
+      const data = await response.json();
+      
+      if (data.members && data.members.length > 0) {
+        allMembers = allMembers.concat(data.members);
+        offset += data.members.length;
+        
+        // Check if there's a next page
+        hasMore = data.pagination && data.pagination.next;
+        console.log(`Got ${data.members.length} members, total so far: ${allMembers.length}`);
+      } else {
+        hasMore = false;
+      }
+      
+      // Safety check to prevent infinite loops
+      if (offset > 1000) {
+        console.log('Safety limit reached');
+        hasMore = false;
+      }
     }
-
-    const data = await response.json();
-    console.log(`Received ${data.members?.length || 0} members from Congress.gov`);
-
-    if (!data.members || data.members.length === 0) {
-      throw new Error('No members data received from Congress.gov');
-    }
+    
+    console.log(`Total members fetched: ${allMembers.length}`);
 
     // State code to full name mapping
     const STATE_MAP = {
@@ -59,7 +80,7 @@ export default async function handler(req, res) {
     };
 
     // Process all members and filter for House only
-    let politicians = data.members
+    let politicians = allMembers
       .filter(member => {
         if (!member.terms?.item || member.terms.item.length === 0) return false;
         const currentTerm = member.terms.item[0];
@@ -100,6 +121,23 @@ export default async function handler(req, res) {
       });
 
     console.log(`Processed ${politicians.length} House representatives`);
+    
+    // Debug: Show state distribution
+    if (req.query.debug === 'states') {
+      const stateCount = {};
+      politicians.forEach(p => {
+        stateCount[p.state] = (stateCount[p.state] || 0) + 1;
+      });
+      
+      return res.status(200).json({
+        totalPoliticians: politicians.length,
+        stateBreakdown: stateCount,
+        statesRepresented: Object.keys(stateCount).length,
+        missingStates: Object.keys(STATE_MAP).filter(code => 
+          !Object.keys(stateCount).includes(STATE_MAP[code])
+        )
+      });
+    }
 
     // Apply filters
     if (party) {
@@ -139,6 +177,7 @@ export default async function handler(req, res) {
     res.status(200).json({ 
       politicians,
       total: politicians.length,
+      totalFetched: allMembers.length,
       timestamp: new Date().toISOString(),
       source: 'congress.gov',
       filters: { party, state, search }
