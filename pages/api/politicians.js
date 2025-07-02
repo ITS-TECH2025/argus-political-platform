@@ -1,89 +1,55 @@
 // pages/api/politicians.js
-// Complete working version with House and Senate support
+// Updated version with fixes for chamber detection and data processing.
 
 export default async function handler(req, res) {
   const { party, state, search, chamber } = req.query;
-  
-  // Get API key from environment variable
+
   const apiKey = process.env.CONGRESS_API_KEY;
-  
+
   if (!apiKey) {
     console.error('CONGRESS_API_KEY not found in environment variables');
-    return res.status(500).json({ 
+    return res.status(500).json({
       error: 'API configuration error',
-      message: 'Congress API key not configured.'
+      message: 'Congress API key not configured.',
     });
   }
 
   try {
-    console.log('Fetching all current members from Congress.gov...');
-    
-    // Fetch ALL members with pagination
+    // --- Step 1: Fetch all current members from the Congress.gov API ---
     let allMembers = [];
     let offset = 0;
-    const limit = 250; // Max per request
+    const limit = 250; // Max members per API request
     let hasMore = true;
-    
+
+    console.log('Fetching all current members from Congress.gov...');
+
     while (hasMore) {
       const url = `https://api.congress.gov/v3/member?api_key=${apiKey}&format=json&limit=${limit}&offset=${offset}&currentMember=true`;
-      console.log(`Fetching members ${offset} to ${offset + limit}...`);
       
       const response = await fetch(url, {
-        headers: {
-          'Accept': 'application/json',
-        }
-      });
+        headers: { 'Accept': 'application/json' },
+      } );
 
       if (!response.ok) {
         throw new Error(`Congress API returned ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
-      
+
       if (data.members && data.members.length > 0) {
         allMembers = allMembers.concat(data.members);
         offset += data.members.length;
-        
-        // Check if there's a next page
-        hasMore = data.pagination && data.pagination.next;
-        console.log(`Got ${data.members.length} members, total so far: ${allMembers.length}`);
+        // The API provides a 'next' link in the pagination object, which is the most reliable way to check for more pages.
+        hasMore = !!data.pagination?.next;
+        console.log(`Fetched ${data.members.length} members. Total so far: ${allMembers.length}`);
       } else {
         hasMore = false;
       }
-      
-      // Safety check to prevent infinite loops
-      if (offset > 1000) {
-        console.log('Safety limit reached');
-        hasMore = false;
-      }
     }
-    
-    console.log(`Total members fetched: ${allMembers.length}`);
 
-    // Debug: Check what chamber values we're getting
-if (req.query.debug === 'chambers') {
-  const chamberTypes = {};
-  allMembers.forEach(member => {
-    const chamber = member.terms?.item?.[0]?.chamber || 'No chamber';
-    chamberTypes[chamber] = (chamberTypes[chamber] || 0) + 1;
-  });
-  
-  // Also show a few Senate examples if any
-  const senateExamples = allMembers
-    .filter(m => m.terms?.item?>[0]?.chamber?.toLowerCase().includes('senat'))
-    .slice(0, 3)
-    .map(m => ({
-      name: m.name,
-      state: m.state,
-      chamber: m.terms.item[0].chamber
-    }));
-  
-  return res.status(200).json({
-    chamberTypes,
-    senateExamples,
-    totalMembers: allMembers.length
-  });
-}    // State code to full name mapping
+    console.log(`Total members fetched from API: ${allMembers.length}`);
+
+    // State code to full name mapping (kept as requested)
     const STATE_MAP = {
       'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas',
       'CA': 'California', 'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware',
@@ -102,118 +68,116 @@ if (req.query.debug === 'chambers') {
       'MP': 'Northern Mariana Islands'
     };
 
-    // Process all members - include both House AND Senate
+    // --- Step 2: Process the fetched members to create a clean data structure ---
     let politicians = allMembers
-      .filter(member => {
-        if (!member.terms?.item || member.terms.item.length === 0) return false;
-        const currentTerm = member.terms.item[0];
-        // Include both chambers
-        return currentTerm.chamber === 'House of Representatives' || 
-               currentTerm.chamber === 'Senate';
-      })
       .map(member => {
-        const currentTerm = member.terms.item[0];
-        const startYear = currentTerm.startYear || 2023;
-        const yearsInOffice = new Date().getFullYear() - startYear + 1;
-        
-        // Determine chamber and title
-        let memberChamber = 'House';
-        let title = 'Representative';
-        
-        if (currentTerm.chamber === 'Senate') {
-          memberChamber = 'Senate';
-          title = 'Senator';
+        const allTerms = member.terms?.item || [];
+        if (allTerms.length === 0) {
+          return null; // Skip if a member has no term data
         }
-        
+
+        // **FIX APPLIED HERE:** Find the most recent term by sorting terms by startYear descending.
+        // This correctly identifies a member's current role if they served in multiple chambers.
+        const latestTerm = allTerms.sort((a, b) => (b.startYear || 0) - (a.startYear || 0))[0];
+
+        // Only include members currently serving in the House or Senate.
+        if (latestTerm.chamber !== 'House of Representatives' && latestTerm.chamber !== 'Senate') {
+          return null;
+        }
+
+        const startYear = latestTerm.startYear || new Date().getFullYear();
+        const yearsInOffice = new Date().getFullYear() - startYear;
+
+        const isSenate = latestTerm.chamber === 'Senate';
+        const memberChamber = isSenate ? 'Senate' : 'House';
+        const title = isSenate ? 'Senator' : 'Representative';
+
         let partyCode = 'I';
         if (member.partyName?.includes('Democratic')) partyCode = 'D';
         else if (member.partyName?.includes('Republican')) partyCode = 'R';
-        
+
         return {
           id: member.bioguideId,
           name: member.name,
           party: partyCode,
           partyName: member.partyName,
-          state: member.state,
-          district: memberChamber === 'House' ? (member.district || 'At-Large') : null,
+          state: member.state, // The API provides the 2-letter code here
+          district: isSenate ? null : (latestTerm.district || 'At-Large'),
           title: title,
           chamber: memberChamber,
           yearsInOffice: yearsInOffice,
           url: member.url || '',
           depiction: member.depiction?.imageUrl || null,
           updateDate: member.updateDate,
+          // Placeholder data (to be replaced with real API data later)
           campaignFinance: {
-            totalRaised: Math.floor(Math.random() * 3000000) + 500000
+            totalRaised: Math.floor(Math.random() * 3000000) + 500000,
           },
           recentVotes: [
             {
               title: 'Recent Vote',
               vote: Math.random() > 0.5 ? 'Yes' : 'No',
-              date: new Date().toISOString().split('T')[0]
-            }
-          ]
+              date: new Date().toISOString().split('T')[0],
+            },
+          ],
         };
-      });
+      })
+      .filter(Boolean); // This removes any null entries from the map operation.
 
-    console.log(`Processed ${politicians.length} Congress members`);
+    console.log(`Processed ${politicians.length} voting members (House and Senate).`);
 
-    // Apply filters
+    // --- Step 3: Apply filters based on query parameters ---
+    let filteredPoliticians = [...politicians];
+
     if (party) {
-      politicians = politicians.filter(p => p.party === party);
-      console.log(`After party filter: ${politicians.length} members`);
+      filteredPoliticians = filteredPoliticians.filter(p => p.party === party);
     }
-    
+
     if (state) {
-      // Convert state code to full name if needed
-      const stateFullName = STATE_MAP[state] || state;
-      console.log(`Filtering for state: ${state} -> ${stateFullName}`);
-      
-      politicians = politicians.filter(p => {
-        return p.state === stateFullName || p.state === state;
-      });
-      
-      console.log(`After state filter: ${politicians.length} members`);
+      const stateFullName = STATE_MAP[state.toUpperCase()] || state;
+      // This logic correctly handles filtering by either state code or full name.
+      filteredPoliticians = filteredPoliticians.filter(p => p.state === state.toUpperCase() || p.state === stateFullName);
     }
-    
+
     if (search) {
       const searchLower = search.toLowerCase();
-      politicians = politicians.filter(p => 
-        p.name.toLowerCase().includes(searchLower) ||
-        p.state.toLowerCase().includes(searchLower)
+      filteredPoliticians = filteredPoliticians.filter(p =>
+        p.name.toLowerCase().includes(searchLower)
       );
-      console.log(`After search filter: ${politicians.length} members`);
-    }
-    
-    if (chamber) {
-      politicians = politicians.filter(p => p.chamber === chamber);
-      console.log(`After chamber filter: ${politicians.length} members`);
     }
 
-    // Sort by state and district
-    politicians.sort((a, b) => {
+    if (chamber) {
+      filteredPoliticians = filteredPoliticians.filter(p => p.chamber === chamber);
+    }
+    
+    console.log(`Returning ${filteredPoliticians.length} members after filtering.`);
+
+    // --- Step 4: Sort the final results ---
+    filteredPoliticians.sort((a, b) => {
       if (a.state !== b.state) return a.state.localeCompare(b.state);
       if (a.chamber !== b.chamber) return a.chamber.localeCompare(b.chamber);
+      // Sort by district number for House members
       const distA = parseInt(a.district) || 999;
       const distB = parseInt(b.district) || 999;
       return distA - distB;
     });
 
-    res.status(200).json({ 
-      politicians,
-      total: politicians.length,
+    // --- Step 5: Send the response ---
+    res.status(200).json({
+      politicians: filteredPoliticians,
+      total: filteredPoliticians.length,
       totalFetched: allMembers.length,
       timestamp: new Date().toISOString(),
       source: 'congress.gov',
-      filters: { party, state, search, chamber }
+      filters: { party, state, search, chamber },
     });
 
   } catch (error) {
-    console.error('Congress API Error:', error);
-    
-    res.status(500).json({ 
-      error: 'Failed to fetch from Congress.gov',
+    console.error('Error in /api/politicians:', error);
+    res.status(500).json({
+      error: 'Failed to fetch data from Congress.gov',
       message: error.message,
-      apiKeyPresent: !!apiKey
+      apiKeyPresent: !!apiKey,
     });
   }
 }
