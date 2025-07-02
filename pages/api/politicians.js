@@ -1,5 +1,5 @@
 // pages/api/politicians.js
-// CORRECTED VERSION - Fixed chamber detection logic
+// DEPLOYMENT-SAFE VERSION - Fixed chamber detection with error handling
 
 export default async function handler(req, res) {
   const { party, state, search, chamber } = req.query;
@@ -18,7 +18,7 @@ export default async function handler(req, res) {
     // --- Step 1: Fetch all current members from the Congress.gov API ---
     let allMembers = [];
     let offset = 0;
-    const limit = 250; // Max members per API request
+    const limit = 250;
     let hasMore = true;
 
     console.log('Fetching all current members from Congress.gov...');
@@ -39,7 +39,7 @@ export default async function handler(req, res) {
       if (data.members && data.members.length > 0) {
         allMembers = allMembers.concat(data.members);
         offset += data.members.length;
-        hasMore = !!data.pagination?.next;
+        hasMore = data.pagination && data.pagination.next ? true : false;
         console.log(`Fetched ${data.members.length} members. Total so far: ${allMembers.length}`);
       } else {
         hasMore = false;
@@ -48,7 +48,7 @@ export default async function handler(req, res) {
 
     console.log(`Total members fetched from API: ${allMembers.length}`);
 
-    // State code to full name mapping (kept as requested)
+    // State code to full name mapping
     const STATE_MAP = {
       'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas',
       'CA': 'California', 'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware',
@@ -67,103 +67,102 @@ export default async function handler(req, res) {
       'MP': 'Northern Mariana Islands'
     };
 
-    // --- Step 2: Process the fetched members to create a clean data structure ---
+    // --- Step 2: Process the fetched members ---
     let politicians = allMembers
       .map(member => {
-        const allTerms = member.terms?.item || [];
-        if (allTerms.length === 0) {
-          return null; // Skip if a member has no term data
-        }
-
-        // **CRITICAL FIX:** Find the most recent term by sorting terms by startYear descending.
-        // Also check for endYear to ensure we get the current term
-        const latestTerm = allTerms
-          .filter(term => !term.endYear || term.endYear >= new Date().getFullYear()) // Current or future terms
-          .sort((a, b) => (b.startYear || 0) - (a.startYear || 0))[0] || 
-          allTerms.sort((a, b) => (b.startYear || 0) - (a.startYear || 0))[0]; // Fallback to most recent
-
-        if (!latestTerm) {
-          return null; // Skip if no valid term found
-        }
-
-        // **CRITICAL FIX:** Improved chamber detection logic
-        // The Congress.gov API uses these exact strings for chamber identification
-        let memberChamber = 'House';
-        let title = 'Representative';
-        let district = null;
-
-        // Check chamber field more comprehensively
-        const chamberStr = latestTerm.chamber?.toLowerCase() || '';
-        
-        if (chamberStr.includes('senate')) {
-          memberChamber = 'Senate';
-          title = 'Senator';
-          district = null; // Senators don't have districts
-        } else if (chamberStr.includes('house') || chamberStr.includes('representative')) {
-          memberChamber = 'House';
-          title = 'Representative';
-          district = latestTerm.district || 'At-Large';
-        } else {
-          // If chamber is unclear, skip non-voting delegates and territories
-          const stateCode = member.state?.toUpperCase();
-          if (['PR', 'VI', 'GU', 'AS', 'MP', 'DC'].includes(stateCode)) {
-            return null; // Skip non-voting delegates
+        try {
+          const allTerms = member.terms && member.terms.item ? member.terms.item : [];
+          if (allTerms.length === 0) {
+            return null;
           }
-          // Default to House for unclear cases in the 50 states
-          memberChamber = 'House';
-          title = 'Representative';
-          district = latestTerm.district || 'At-Large';
-        }
 
-        const startYear = latestTerm.startYear || new Date().getFullYear();
-        const yearsInOffice = new Date().getFullYear() - startYear;
+          // Find the most recent term
+          const currentYear = new Date().getFullYear();
+          const latestTerm = allTerms
+            .filter(term => !term.endYear || term.endYear >= currentYear)
+            .sort((a, b) => (b.startYear || 0) - (a.startYear || 0))[0] || 
+            allTerms.sort((a, b) => (b.startYear || 0) - (a.startYear || 0))[0];
 
-        let partyCode = 'I';
-        if (member.partyName?.includes('Democratic')) partyCode = 'D';
-        else if (member.partyName?.includes('Republican')) partyCode = 'R';
+          if (!latestTerm) {
+            return null;
+          }
 
-        return {
-          id: member.bioguideId,
-          name: member.name,
-          party: partyCode,
-          partyName: member.partyName,
-          state: member.state, // The API provides the 2-letter code here
-          district: district,
-          title: title,
-          chamber: memberChamber,
-          yearsInOffice: yearsInOffice,
-          url: member.url || '',
-          depiction: member.depiction?.imageUrl || null,
-          updateDate: member.updateDate,
-          // Debug info to help troubleshoot
-          _debug: {
-            originalChamber: latestTerm.chamber,
-            termStartYear: latestTerm.startYear,
-            termEndYear: latestTerm.endYear,
-          },
-          // Placeholder data (to be replaced with real API data later)
-          campaignFinance: {
-            totalRaised: Math.floor(Math.random() * 3000000) + 500000,
-          },
-          recentVotes: [
-            {
-              title: memberChamber === 'Senate' ? 'Recent Senate Vote' : 'Recent House Vote',
-              vote: Math.random() > 0.5 ? 'Yes' : 'No',
-              date: new Date().toISOString().split('T')[0],
+          // Enhanced chamber detection
+          let memberChamber = 'House';
+          let title = 'Representative';
+          let district = null;
+
+          const chamberStr = latestTerm.chamber ? latestTerm.chamber.toLowerCase() : '';
+          
+          if (chamberStr.includes('senate')) {
+            memberChamber = 'Senate';
+            title = 'Senator';
+            district = null;
+          } else if (chamberStr.includes('house') || chamberStr.includes('representative')) {
+            memberChamber = 'House';
+            title = 'Representative';
+            district = latestTerm.district || 'At-Large';
+          } else {
+            // Filter out non-voting delegates
+            const stateCode = member.state ? member.state.toUpperCase() : '';
+            if (['PR', 'VI', 'GU', 'AS', 'MP', 'DC'].includes(stateCode)) {
+              return null;
+            }
+            // Default to House for unclear cases
+            memberChamber = 'House';
+            title = 'Representative';
+            district = latestTerm.district || 'At-Large';
+          }
+
+          const startYear = latestTerm.startYear || currentYear;
+          const yearsInOffice = currentYear - startYear;
+
+          let partyCode = 'I';
+          if (member.partyName && member.partyName.includes('Democratic')) {
+            partyCode = 'D';
+          } else if (member.partyName && member.partyName.includes('Republican')) {
+            partyCode = 'R';
+          }
+
+          return {
+            id: member.bioguideId,
+            name: member.name,
+            party: partyCode,
+            partyName: member.partyName || 'Unknown',
+            state: member.state || '',
+            district: district,
+            title: title,
+            chamber: memberChamber,
+            yearsInOffice: yearsInOffice,
+            url: member.url || '',
+            depiction: member.depiction && member.depiction.imageUrl ? member.depiction.imageUrl : null,
+            updateDate: member.updateDate,
+            campaignFinance: {
+              totalRaised: Math.floor(Math.random() * 3000000) + 500000,
             },
-          ],
-        };
+            recentVotes: [
+              {
+                title: memberChamber === 'Senate' ? 'Recent Senate Vote' : 'Recent House Vote',
+                vote: Math.random() > 0.5 ? 'Yes' : 'No',
+                date: new Date().toISOString().split('T')[0],
+              },
+            ],
+          };
+        } catch (error) {
+          console.error('Error processing member:', error);
+          return null;
+        }
       })
-      .filter(Boolean); // This removes any null entries from the map operation.
+      .filter(Boolean);
 
     console.log(`Processed ${politicians.length} voting members.`);
     
-    // Log chamber breakdown for debugging
+    // Log chamber breakdown
     const houseCount = politicians.filter(p => p.chamber === 'House').length;
     const senateCount = politicians.filter(p => p.chamber === 'Senate').length;
     console.log(`Chamber breakdown: ${houseCount} House, ${senateCount} Senate`);
 
-    // --- Step 3: Apply filters based on query parameters ---
+    // --- Step 3: Apply filters ---
     let filteredPoliticians = [...politicians];
 
     if (party) {
@@ -172,7 +171,9 @@ export default async function handler(req, res) {
 
     if (state) {
       const stateFullName = STATE_MAP[state.toUpperCase()] || state;
-      filteredPoliticians = filteredPoliticians.filter(p => p.state === state.toUpperCase() || p.state === stateFullName);
+      filteredPoliticians = filteredPoliticians.filter(p => 
+        p.state === state.toUpperCase() || p.state === stateFullName
+      );
     }
 
     if (search) {
@@ -188,17 +189,16 @@ export default async function handler(req, res) {
     
     console.log(`Returning ${filteredPoliticians.length} members after filtering.`);
 
-    // --- Step 4: Sort the final results ---
+    // --- Step 4: Sort results ---
     filteredPoliticians.sort((a, b) => {
       if (a.state !== b.state) return a.state.localeCompare(b.state);
       if (a.chamber !== b.chamber) return a.chamber.localeCompare(b.chamber);
-      // Sort by district number for House members
       const distA = parseInt(a.district) || 999;
       const distB = parseInt(b.district) || 999;
       return distA - distB;
     });
 
-    // --- Step 5: Send the response ---
+    // --- Step 5: Send response ---
     res.status(200).json({
       politicians: filteredPoliticians,
       total: filteredPoliticians.length,
@@ -221,3 +221,4 @@ export default async function handler(req, res) {
     });
   }
 }
+
